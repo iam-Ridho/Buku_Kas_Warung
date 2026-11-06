@@ -1,0 +1,56 @@
+@startuml
+title Sequence — Tambah Produk dengan Scan Barcode + OFF
+autonumber
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam dpi 140
+
+actor "Pemilik" as U
+participant "ProdukScreen" as UI
+participant "BarcodeScanner" as SCAN
+participant "ProductRepository" as REPO
+database "SQLite\n(Drift)" as DB
+participant "OffClient" as OFFC
+participant "Open Food Facts\n(Product & Prices API)" as OFF
+
+U -> UI : tambah produk → scan barcode
+UI -> SCAN : buka kamera
+SCAN --> UI : barcode
+UI -> REPO : findByBarcode(barcode)
+REPO -> DB : SELECT products WHERE barcode = ? AND deleted_at IS NULL
+DB --> REPO : hasil
+
+alt produk sudah ada
+  REPO --> UI : produk
+  UI --> U : buka layar edit (hindari duplikat)
+else belum ada
+  UI -> REPO : referenceFor(barcode)
+  REPO -> DB : SELECT product_references WHERE barcode = ?
+  alt cache ada & masih segar
+    DB --> REPO : nama + harga referensi
+  else tidak ada / kedaluwarsa
+    REPO -> OFFC : fetch(barcode)  [timeout pendek]
+    OFFC -> OFF : ambil nama produk (Product API)
+    OFFC -> OFF : ambil harga per barcode (Prices API)
+    alt berhasil
+      OFF --> OFFC : data produk + harga
+      OFFC --> REPO : ref (nama, harga IDR, tanggal)
+      REPO -> DB : UPSERT product_references (cache lokal)
+    else gagal / timeout / kosong / bukan IDR
+      OFFC --> REPO : null
+    end
+  end
+  REPO --> UI : referensi (atau kosong)
+  UI --> U : form terisi otomatis (label "estimasi dari OFF")\natau form kosong
+  U -> UI : isi / ubah nama, harga jual, modal, stok minimum
+  UI -> REPO : saveProduct(data)
+  REPO -> DB : INSERT products (dirty = 1)
+  DB --> REPO : ok
+  REPO --> UI : tersimpan
+end
+
+note over OFFC, OFF
+  Harga OFF hanya SARAN dan tidak pernah menimpa input pemilik.
+  Kegagalan API tidak memblokir penyimpanan produk.
+end note
+@enduml

@@ -1,0 +1,70 @@
+@startuml
+title Sequence — Catat Penjualan (offline-first)
+autonumber
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam dpi 140
+
+actor "Pemilik" as U
+participant "KasirScreen" as UI
+participant "CartNotifier" as CART
+participant "Calculators\n(domain)" as CALC
+participant "SaleRepository" as REPO
+database "SQLite\n(Drift)" as DB
+participant "NotificationService" as NOTIF
+
+U -> UI : buka layar Kasir
+UI -> CART : newCart()
+note right of CART
+  UUID penjualan dibuat SEKARANG,
+  bukan saat tombol Bayar → tap ganda aman.
+end note
+
+U -> UI : scan / cari barang, isi jumlah
+UI -> CART : addItem(produk, qtyMilli)
+CART -> CALC : lineRevenue(qtyMilli, harga)
+CALC --> CART : revenueTotal
+
+U -> UI : tekan "Bayar"
+UI -> CART : checkout()
+CART -> REPO : stockOf(productIds)
+REPO -> DB : SELECT SUM(qty_milli) ... GROUP BY product_id
+DB --> REPO : stok per produk
+REPO --> CART : stok
+
+alt stok cukup untuk semua item
+  CART -> CART : lanjut
+else ada item kurang & mode "blokir stok" aktif
+  CART --> UI : tolak + daftar item yang kurang
+  UI --> U : tampilkan pesan, kembali ke keranjang
+else ada item kurang & mode peringatan (default)
+  CART --> UI : minta konfirmasi
+  UI --> U : "Stok tercatat 3, jual 5. Lanjutkan?"
+  U --> UI : lanjutkan / batal
+end
+
+opt dilanjutkan (stok cukup atau pemilik konfirmasi)
+  CART -> CALC : lineCost(qtyMilli, costPrice) per item
+  CALC --> CART : costTotal (null jika modal belum diisi)
+  CART -> REPO : recordSale(draft)
+  activate REPO
+  REPO -> DB : BEGIN
+  REPO -> DB : INSERT sales (dirty = 1)
+  note right of DB : Jika id sudah ada (tap ganda) → diabaikan.
+  REPO -> DB : INSERT sale_items (snapshot harga & modal)
+  REPO -> DB : INSERT stock_movements (type = sale, qty negatif)
+  REPO -> DB : COMMIT
+  opt stok melewati batas (sebelumnya > min, sekarang ≤ min)
+    REPO -> NOTIF : notifikasi stok menipis
+  end
+  REPO --> CART : sukses
+  deactivate REPO
+  CART --> UI : ringkasan penjualan
+  UI --> U : tampilkan ringkasan
+end
+
+note over DB
+  Tidak ada panggilan jaringan di jalur ini.
+  Sync berjalan terpisah di latar belakang (baris dirty = 1).
+end note
+@enduml

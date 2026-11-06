@@ -1,0 +1,149 @@
+@startuml
+title ERD Server — BukuKasWarung (PostgreSQL, tahap 3)
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam dpi 140
+hide circle
+
+entity "users" as users {
+  * id : uuid <<PK>>  (= owner_id)
+  --
+  * email : text <<UQ>>
+  password_hash : text <<null>>  (argon2 / bcrypt)
+  * created_at : timestamptz
+  deleted_at : timestamptz <<null>>
+}
+
+entity "refresh_tokens" as rt {
+  * id : uuid <<PK>>
+  --
+  * user_id : uuid <<FK>>
+  * token_hash : text <<UQ>>
+  device_id : uuid <<null>>
+  * expires_at : timestamptz
+  revoked_at : timestamptz <<null>>
+  * created_at : timestamptz
+}
+
+entity "devices  (opsional)" as devices {
+  * owner_id : uuid <<PK, FK>>
+  * device_id : uuid <<PK>>
+  --
+  app_version : int
+  last_sync_at : timestamptz
+}
+
+entity "owner_sync_state" as oss {
+  * owner_id : uuid <<PK, FK>>
+  --
+  * epoch : uuid  (berubah jika data direset)
+  * next_seq : bigint  (counter; di-lock saat push)
+  * updated_at : timestamptz
+}
+
+entity "products" as products {
+  * owner_id : uuid <<PK, FK>>
+  * id : uuid <<PK>>
+  --
+  barcode : text <<null>>
+  * name : text
+  * unit : text
+  * sell_price : bigint
+  cost_price : bigint <<null>>
+  * min_stock_milli : bigint
+  bulk_unit_name : text <<null>>
+  bulk_unit_size : int <<null>>
+  kolom sinkron *
+}
+
+entity "stock_movements" as mv {
+  * owner_id : uuid <<PK, FK>>
+  * id : uuid <<PK>>
+  --
+  * product_id : uuid  (ref logis)
+  * type : text  (purchase | sale | adjustment | voidReversal)
+  * qty_milli : bigint  (≠ 0)
+  total_cost : bigint <<null>>
+  source_id : uuid <<null>>  (ref logis)
+  note : text <<null>>
+  * occurred_at : timestamptz
+  kolom sinkron *
+}
+
+entity "sales" as sales {
+  * owner_id : uuid <<PK, FK>>
+  * id : uuid <<PK>>
+  --
+  * occurred_at : timestamptz
+  * business_date : date
+  * revenue_total : bigint
+  voided_at : timestamptz <<null>>
+  note : text <<null>>
+  kolom sinkron *
+}
+
+entity "sale_items" as items {
+  * owner_id : uuid <<PK, FK>>
+  * id : uuid <<PK>>
+  --
+  * sale_id : uuid  (ref logis)
+  * product_id : uuid  (ref logis)
+  * product_name : text  (snapshot)
+  * qty_milli : bigint  (> 0)
+  * unit_price : bigint  (snapshot)
+  * revenue_total : bigint
+  cost_total : bigint <<null>>  (snapshot modal)
+  kolom sinkron *
+}
+
+entity "expenses" as exp {
+  * owner_id : uuid <<PK, FK>>
+  * id : uuid <<PK>>
+  --
+  * category : text
+  * amount : bigint
+  * occurred_at : timestamptz
+  * business_date : date
+  note : text <<null>>
+  kolom sinkron *
+}
+
+users ||--o{ rt
+users ||--o{ devices
+users ||--|| oss
+users ||--o{ products
+users ||--o{ mv
+users ||--o{ sales
+users ||--o{ items
+users ||--o{ exp
+
+products ..o{ mv : "product_id"
+products ..o{ items : "product_id"
+sales ..|{ items : "sale_id"
+sales ..o{ mv : "source_id"
+
+note bottom of exp
+  <b>* kolom sinkron</b> (semua tabel sinkron): created_at · updated_at (jam klien) ·
+  deleted_at (soft delete) · server_seq (bigint) · server_updated_at (timestamptz)
+
+  <b>Kunci & indeks</b>
+  PK (owner_id, id) di setiap tabel sinkron; INDEX (owner_id, server_seq).
+  Tambahan: stock_movements (owner_id, product_id) · sale_items (owner_id, sale_id) ·
+  sales & expenses (owner_id, business_date).
+  server_seq berasal dari counter per owner (owner_sync_state.next_seq): unik per owner lintas tabel.
+
+  <b>CHECK</b>
+  uang ≥ 0; qty_milli ≠ 0 (movements) dan > 0 (sale_items);
+  type IN ('purchase','sale','adjustment','voidReversal').
+
+  <b>Sengaja tidak ada</b>
+  FK antar tabel sinkron (batch push bisa datang terpisah; garis putus = referensi logis) dan
+  UNIQUE barcode di server (mencegah baris ditolak terus-menerus; keunikan dijaga klien).
+
+  <b>Pemetaan dari SQLite</b>
+  INTEGER → bigint (uang & milli-unit) · TEXT UUID → uuid · DateTime → timestamptz ·
+  business_date TEXT → date. Kolom dirty hanya ada di lokal;
+  owner_id, server_seq, server_updated_at hanya ada di server.
+  Tabel hanya-lokal: product_references, sync_meta (lihat ERD lokal).
+end note
+@enduml

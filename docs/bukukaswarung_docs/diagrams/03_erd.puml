@@ -1,0 +1,95 @@
+@startuml
+title ERD Lokal — BukuKasWarung (SQLite / Drift)
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam linetype ortho
+skinparam dpi 140
+hide circle
+
+entity "products" as products {
+  * id : text <<PK>>
+  --
+  barcode : text <<null>>
+  * name : text
+  * unit : text
+  * sell_price : int  (Rp per 1 unit)
+  cost_price : int <<null>>  (modal terakhir)
+  * min_stock_milli : int
+  bulk_unit_name : text <<null>>
+  bulk_unit_size : int <<null>>
+}
+
+entity "stock_movements" as movements {
+  * id : text <<PK>>
+  --
+  * product_id : text <<FK>>
+  * type : purchase | sale | adjustment | voidReversal
+  * qty_milli : int  (+ masuk, − keluar)
+  total_cost : int <<null>>  (khusus purchase)
+  source_id : text <<null>>  (sale_id / movement dibalik)
+  note : text <<null>>
+  * occurred_at : datetime
+}
+
+entity "sales" as sales {
+  * id : text <<PK>>
+  --
+  * occurred_at : datetime
+  * business_date : text  (YYYY-MM-DD, waktu lokal)
+  * revenue_total : int
+  voided_at : datetime <<null>>
+  note : text <<null>>
+}
+
+entity "sale_items" as items {
+  * id : text <<PK>>
+  --
+  * sale_id : text <<FK>>
+  * product_id : text <<FK>>
+  * product_name : text  (snapshot)
+  * qty_milli : int
+  * unit_price : int  (snapshot)
+  * revenue_total : int
+  cost_total : int <<null>>  (snapshot modal)
+}
+
+entity "expenses" as expenses {
+  * id : text <<PK>>
+  --
+  * category : text
+  * amount : int
+  * occurred_at : datetime
+  * business_date : text
+  note : text <<null>>
+}
+
+entity "product_references\n(LOKAL, tidak disinkronkan)" as refs {
+  * barcode : text <<PK>>
+  --
+  name : text <<null>>
+  ref_price : int <<null>>  (hanya IDR)
+  currency : text <<null>>
+  price_date : datetime <<null>>
+  * fetched_at : datetime
+}
+
+entity "sync_meta\n(LOKAL)" as meta {
+  * key : text <<PK>>
+  --
+  * value : text
+  (deviceId, lastPullCursor,\nownerId, epoch)
+}
+
+products ||--o{ movements : "mengubah stok"
+products ||--o{ items : "terjual sebagai"
+sales ||--|{ items : "terdiri dari"
+sales |o..o{ movements : "source_id (logis)"
+products |o..o| refs : "barcode (cache, tanpa FK)"
+
+note bottom of expenses
+  Kolom sinkron di setiap tabel sync (selain 2 tabel lokal):
+  id (UUID) · created_at · updated_at · deleted_at (soft delete)
+  dirty · server_seq
+  Uang = integer rupiah. Kuantitas = integer milli-unit (1000 = 1 unit).
+end note
+@enduml

@@ -1,0 +1,79 @@
+@startuml
+title Arsitektur Sistem — BukuKasWarung (offline-first)
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam dpi 140
+skinparam nodesep 30
+skinparam ranksep 50
+left to right direction
+
+node "Google Play\n(akun developer kampus)" as PLAY
+
+node "HP Android — Pemilik Warung" as PHONE {
+  package "Aplikasi Flutter" {
+    package "features (presentation)" as PRES {
+      component "Kasir" as KASIR
+      component "Produk" as PRODUK
+      component "Stok" as STOK
+      component "Laporan" as LAPOR
+      component "Pengaturan" as SET
+      component "Riverpod\n(Notifier / StreamProvider)" as RP
+    }
+    package "domain" as DOM {
+      component "Calculators (fungsi murni)\nlineRevenue · lineCost · grossProfit\nstockStatus · businessDate" as CALC
+    }
+    package "data" as DATA {
+      component "Repositories\nproduct · sale · stock · expense" as REPO
+      component "Drift DAOs" as DAO
+      component "OFF Client\n(cache + fallback manual)" as OFFC
+      component "Sync Client\n(baris dirty = antrean)" as SYNC
+    }
+  }
+  database "SQLite (Drift)\nSUMBER KEBENARAN" as SQLITE
+  component "Notifikasi lokal\n(stok menipis)" as NOTIF
+}
+
+cloud "Hosting gratis (mis. Render)" as CLOUD {
+  node "FastAPI (Docker)" as API {
+    component "Auth (JWT)\n/v1/auth/*" as AUTH
+    component "Sync API\n/v1/sync/push · /pull" as SAPI
+  }
+  database "PostgreSQL (mis. Neon)\nsalinan / backup" as PG
+}
+
+cloud "Open Food Facts" as OFFC_EXT {
+  component "Product API" as OFFP
+  component "Open Prices API" as OFFR
+}
+
+KASIR --> RP
+PRODUK --> RP
+STOK --> RP
+LAPOR --> RP
+SET --> RP
+
+RP --> CALC
+RP --> REPO
+RP --> OFFC
+REPO --> DAO
+DAO --> SQLITE
+REPO ..> NOTIF
+SYNC --> DAO : baca / tandai dirty
+
+OFFC --> OFFP : HTTPS
+OFFC --> OFFR : HTTPS
+SYNC --> AUTH : HTTPS
+SYNC --> SAPI : HTTPS (push / pull)
+AUTH --> PG
+SAPI --> PG
+
+PLAY ..> PHONE : distribusi aplikasi
+
+note right of PG
+  Server boleh mati / tidur / direset:
+  aplikasi tetap berfungsi penuh secara lokal.
+  Server dapat dibangun ulang dari klien (epoch).
+end note
+@enduml

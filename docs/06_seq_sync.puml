@@ -1,0 +1,65 @@
+@startuml
+title Sequence — Sinkronisasi (push → pull, dengan epoch)
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam dpi 140
+
+participant "SyncClient\n(Flutter)" as C
+database "SQLite\n(Drift)" as DB
+participant "FastAPI" as API
+database "PostgreSQL" as PG
+
+== Pemicu ==
+C -> C : aplikasi dibuka / setelah transaksi / periodik
+C -> API : ping ringan (membangunkan server)
+note right of API
+  Cold start 30–60 dtk di free tier.
+  Timeout pertama ≥ 60–90 dtk. UI tidak menunggu sync.
+end note
+
+== Push ==
+loop selama ada baris dirty
+  C -> DB : SELECT baris dirty = 1 (maks 200)
+  DB --> C : baris
+  C -> API : POST /v1/sync/push\n(JWT, X-App-Version, device_id, epoch, rows)
+  activate API
+  API -> API : validasi JWT → owner_id\ncek versi aplikasi (426 jika terlalu lama)
+  API -> PG : BEGIN; kunci owner_sync_state (FOR UPDATE)
+  loop tiap baris (owner_id, id)
+    alt belum ada
+      API -> PG : INSERT, seq = ++next_seq → applied
+    else isi identik (retry)
+      API -> API : unchanged (seq lama)
+    else tabel append-only, selain deleted_at / voided_at
+      API -> API : rejected
+    else products, base_seq ≠ seq server
+      API -> API : stale
+    else products, base_seq sama
+      API -> PG : UPDATE, seq baru → applied
+    end
+  end
+  API -> PG : COMMIT
+  API --> C : epoch + results[]
+  deactivate API
+  alt epoch ≠ epoch tersimpan (server direset)
+    C -> DB : cursor = 0; dirty = 1 untuk SEMUA baris
+    note right of C : full re-upload: kembali ke awal Push
+  else epoch sama
+    C -> DB : applied / unchanged → dirty = 0, simpan server_seq
+    note right of C
+      stale → ditimpa hasil Pull.
+      rejected → catat error, batasi retry.
+    end note
+  end
+end
+
+== Pull ==
+loop selama has_more
+  C -> API : GET /v1/sync/pull?cursor=N&epoch=E
+  API -> PG : SELECT milik owner WHERE seq > N ORDER BY seq LIMIT 500
+  PG --> API : baris
+  API --> C : epoch, changes[], next_cursor, has_more
+  C -> DB : BEGIN (defer_foreign_keys = ON)\nterapkan perubahan, lewati baris dirty; COMMIT
+  C -> DB : simpan next_cursor + epoch (sync_meta)
+end
+@enduml

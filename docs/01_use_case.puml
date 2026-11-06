@@ -1,0 +1,59 @@
+@startuml
+title Use Case — BukuKasWarung
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam dpi 140
+skinparam usecase {
+  BackgroundColor #F7F9FC
+  BorderColor #3B5B92
+}
+
+actor "Pemilik Warung" as Owner
+actor "Open Food Facts\n(Product & Prices API)" as OFF
+actor "Server Sync\n(FastAPI)" as SRV
+
+rectangle "BukuKasWarung (aplikasi Android)" {
+  usecase "Catat penjualan" as UC_JUAL
+  usecase "Catat pembelian stok" as UC_BELI
+  usecase "Koreksi stok" as UC_KOREKSI
+  usecase "Batalkan penjualan" as UC_VOID
+  usecase "Kelola produk" as UC_PRODUK
+  usecase "Catat pengeluaran" as UC_BIAYA
+  usecase "Lihat laporan\n(omzet & laba kotor)" as UC_LAPOR
+  usecase "Lihat stok menipis / habis" as UC_STOK
+  usecase "Ekspor / impor backup" as UC_BACKUP
+  usecase "Daftar / masuk akun" as UC_AUTH
+  usecase "Sinkronisasi data\n(otomatis, latar belakang)" as UC_SYNC
+  usecase "Scan barcode" as UC_SCAN
+  usecase "Ambil nama & harga\nreferensi (OFF)" as UC_REF
+  usecase "Konfirmasi jual\nmelebihi stok" as UC_KONFIRM
+}
+
+Owner --> UC_JUAL
+Owner --> UC_BELI
+Owner --> UC_KOREKSI
+Owner --> UC_VOID
+Owner --> UC_PRODUK
+Owner --> UC_BIAYA
+Owner --> UC_LAPOR
+Owner --> UC_STOK
+Owner --> UC_BACKUP
+Owner --> UC_AUTH
+
+UC_SCAN ..> UC_JUAL : <<extend>>
+UC_SCAN ..> UC_BELI : <<extend>>
+UC_SCAN ..> UC_PRODUK : <<extend>>
+UC_REF ..> UC_PRODUK : <<extend>>
+UC_KONFIRM ..> UC_JUAL : <<extend>>
+
+UC_REF --> OFF
+UC_AUTH --> SRV
+UC_SYNC --> SRV
+
+note bottom of UC_REF
+  Harga OFF hanya saran,
+  tidak menimpa input pemilik.
+  Gagal / offline → input manual.
+end note
+@enduml

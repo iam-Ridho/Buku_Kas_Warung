@@ -1,0 +1,52 @@
+@startuml
+title Activity — Alur Kasir (stok tidak cukup = peringatan)
+skinparam shadowing false
+skinparam defaultFontName DejaVu Sans
+skinparam dpi 140
+
+start
+:Buka layar Kasir;
+:Buat UUID penjualan;
+repeat
+  repeat
+    :Pilih barang (scan / cari);
+    if (Produk terdaftar?) then (tidak)
+      :Tambah produk cepat\n(nama + harga jual);
+    endif
+    :Isi jumlah, tambahkan ke keranjang;
+  repeat while (Tambah barang lagi?) is (ya) not (tidak)
+  :Tekan "Bayar";
+  :Periksa stok tercatat tiap item;
+  if (Stok cukup untuk semua item?) then (ya)
+    :Tandai: diterima;
+  else (tidak)
+    if (Pengaturan "blokir stok" aktif?) then (ya)
+      :Tampilkan item yang kurang;
+      :Tandai: ditolak, kembali ke keranjang;
+    else (tidak, default)
+      :Peringatan "Stok tercatat X, jual Y. Lanjutkan?";
+      if (Pemilik konfirmasi?) then (ya)
+        :Tandai: diterima;
+      else (tidak)
+        :Tandai: ditolak, kembali ke keranjang;
+      endif
+    endif
+  endif
+repeat while (Ditolak?) is (ya) not (tidak)
+
+partition "Satu transaksi database (atomik)" {
+  :Simpan sales (dirty = 1);
+  :Simpan sale_items\n(snapshot harga jual & modal);
+  :Simpan stock_movements\n(type = sale, qty negatif);
+}
+note right
+  UUID sama dikirim dua kali (tap ganda)
+  → insert kedua diabaikan.
+end note
+
+if (Stok melewati batas minimal?) then (ya)
+  :Kirim notifikasi lokal stok menipis;
+endif
+:Tampilkan ringkasan penjualan;
+stop
+@enduml
